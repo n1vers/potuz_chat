@@ -43,14 +43,59 @@ export default function Chat() {
     textMsgOther: darkMode ? "#e1e1e6" : "#1c1e21"     // Текст чужих сообщений
   };
 
-  // ФУНКЦИЯ ДЛЯ БЕЗОПАСНОГО СТРОЕНИЯ ПУТИ АВАТАРКИ
+  // --- ИЗМЕНЕНИЕ 1: УМНАЯ ФУНКЦИЯ НОРМАЛИЗАЦИИ ПУТИ АВАТАРОК ---
+  // ФИНАЛЬНАЯ НАСТРОЙКА ПОД ТВОЮ СТАТИКУ (/static)
   const getAvatarUrl = (avatarPath) => {
     if (!avatarPath) return null;
-    if (avatarPath.startsWith("http")) return avatarPath; // если уже полная ссылка
-    if (avatarPath.startsWith("/static")) return `http://localhost:5000${avatarPath}`; // если static уже есть в пути
-    return `http://localhost:5000/static${avatarPath}`; // если static нет в пути
+    
+    // Если это полная внешняя ссылка — отдаем как есть
+    if (avatarPath.startsWith("http://") || avatarPath.startsWith("https://")) {
+      return avatarPath; 
+    }
+
+    // Если путь в базе уже начинается со слова "/static"
+    if (avatarPath.startsWith("/static")) {
+      return `http://localhost:5000${avatarPath}`;
+    }
+
+    // Если путь начинается со слэша (как твои /uploads/avatars/...)
+    if (avatarPath.startsWith("/")) {
+      return `http://localhost:5000/static${avatarPath}`; 
+      // На выходе получим: http://localhost:5000/static/uploads/avatars/avatar-xxx.jpg
+    }
+    
+    // Если вдруг в базе путь лежит без слэша в начале ("uploads/avatars/...")
+    return `http://localhost:5000/static/${avatarPath}`;
+  };
+  // Функция, которая делает из "2026-05-14T07:49..." просто "10:49"
+  const formatTime = (isoString) => {
+    if (!isoString) return "";
+    const date = new Date(isoString);
+    // Извлекаем часы и минуты, добавляя ноль в начало, если цифра меньше 10
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${hours}:${minutes}`;
   };
 
+  // Функция для красивого разделения сообщений по дням
+  const formatMessageDate = (isoString) => {
+    if (!isoString) return "";
+    const date = new Date(isoString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    // Если это сегодня
+    if (date.toDateString() === today.toDateString()) {
+      return "Сегодня";
+    }
+    // Если это вчера
+    if (date.toDateString() === yesterday.toDateString()) {
+      return "Вчера";
+    }
+    // Если более старая дата — выводим "14 мая 2026"
+    return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+  };
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem("user");
@@ -105,7 +150,11 @@ export default function Chat() {
         .catch((err) => console.error("Ошибка истории личных сообщений:", err));
 
       const handlePrivateMessage = (newMsg) => {
-        setMessages((prev) => [...prev, newMsg]);
+        setMessages((prev) => {
+          const isDuplicate = prev.some((msg) => msg._id === newMsg._id);
+          if (isDuplicate) return prev; 
+          return [...prev, newMsg];
+        });
         loadDialogs(); 
       };
 
@@ -113,10 +162,16 @@ export default function Chat() {
       socket.on("receive-message", handlePrivateMessage); 
     }
 
+    socket.on("message-deleted", (deletedMessageId) => {
+      setMessages((prev) => prev.filter((msg) => msg._id !== deletedMessageId));
+      loadDialogs();
+    });
+
     return () => {
       socket.off("receive-global-message");
       socket.off("new-message");
       socket.off("receive-message");
+      socket.off("message-deleted");
     };
   }, [activeDialog, user]);
 
@@ -159,6 +214,21 @@ export default function Chat() {
       setSelectedUserProfile(null); 
     } catch (error) {
       console.error("Не удалось открыть личный чат:", error);
+    }
+  }
+
+  async function deleteMessage(messageId) {
+    if (!window.confirm("Вы уверены, что хотите удалить это сообщение?")) return;
+
+    try {
+      await axios.delete(`http://localhost:5000/v1/messages/${messageId}`, { withCredentials: true });
+      setMessages((prev) => prev.filter((msg) => msg._id !== messageId));
+      
+      socket.emit("delete-message", { messageId, chatId: activeDialog === null ? "global" : activeDialog.chatId });
+      loadDialogs();
+    } catch (error) {
+      console.error("Ошибка при удалении сообщения:", error);
+      alert(error.response?.data?.message || "Не удалось удалить сообщение");
     }
   }
 
@@ -245,7 +315,6 @@ export default function Chat() {
           <h2 style={{ margin: 0, fontSize: "22px", color: theme.textTitle, fontWeight: "700" }}>Чаты</h2>
           
           <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-            {/* КНОПКА ПЕРЕКЛЮЧЕНИЯ ТЕМЫ */}
             <button 
               onClick={() => setDarkMode(!darkMode)} 
               style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", padding: 0 }}
@@ -281,17 +350,17 @@ export default function Chat() {
           {dialogs.length === 0 ? (
             <p style={{ color: theme.textSub, fontSize: "13px", textAlign: "center", marginTop: "20px" }}>Нет активных переписок.</p>
           ) : (
-            dialogs.map((d) => {
+            dialogs.map((d, index) => {
               if (!d) return null;
               const isSelected = activeDialog?.chatId === d.chatId;
               
-              // ИСПРАВЛЕНО: Безопасное получение аватарки диалога
+              // --- ИЗМЕНЕНИЕ 2: Нормализуем аватарку в списке диалогов ---
               const dialogAvatar = getAvatarUrl(d.user?.avatar);
               const isOnline = d.user?.isOnline || false; 
 
               return (
                 <div 
-                  key={d.chatId} 
+                  key={`${d.chatId || 'chat'}-${index}`}
                   onClick={() => setActiveDialog(d)}
                   style={{
                     padding: "12px", 
@@ -353,7 +422,7 @@ export default function Chat() {
           </div>
         </div>
         
-        {/* Лента сообщений */}
+        {/* Лента сообщений с группировкой по датам и временем */}
         <div style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
           {Array.isArray(messages) && messages.map((msg, index) => {
             if (!msg) return null;
@@ -361,65 +430,124 @@ export default function Chat() {
             const hasSenderObj = msg.sender && typeof msg.sender === "object";
             const senderName = hasSenderObj ? msg.sender.username : (msg.sender || "Пользователь");
             const isMe = senderName === user.username;
-            
-            // ИСПРАВЛЕНО: Безопасное получение аватарки отправителя сообщения
             const avatarUrl = hasSenderObj && msg.sender.avatar ? getAvatarUrl(msg.sender.avatar) : null;
 
+            // Логика для группировки по датам:
+            // Проверяем, отличается ли дата текущего сообщения от предыдущего
+            const currentMsgDate = formatMessageDate(msg.createdAt);
+            const prevMsgDate = index > 0 ? formatMessageDate(messages[index - 1]?.createdAt) : null;
+            const showDateSeparator = currentMsgDate !== prevMsgDate;
+
             return (
-              <div key={msg._id || index} style={{ alignSelf: isMe ? "flex-end" : "flex-start", maxWidth: "65%", display: "flex", gap: "10px", alignItems: "flex-end" }}>
+              <div key={`${msg._id || 'msg'}-${index}`} style={{ display: "flex", flexDirection: "column", width: "100%" }}>
                 
-                {!isMe && (
-                  <div 
-                    onClick={() => handleUserClick(msg.sender)}
-                    style={{ cursor: "pointer", width: "34px", height: "34px", borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}
-                  >
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <div style={{ width: "100%", height: "100%", backgroundColor: theme.accent, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "13px" }}>
-                        {senderName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                {/* РАЗДЕЛИТЕЛЬ ДАТЫ (например: Сегодня, Вчера, 14 мая) */}
+                {showDateSeparator && (
+                  <div style={{ 
+                    alignSelf: "center", 
+                    margin: "20px 0 10px 0", 
+                    backgroundColor: darkMode ? "#202024" : "#e4e6eb", 
+                    color: theme.textSub, 
+                    padding: "4px 12px", 
+                    borderRadius: "12px", 
+                    fontSize: "12px", 
+                    fontWeight: "600" 
+                  }}>
+                    {currentMsgDate}
                   </div>
                 )}
 
-                <div style={{ 
-                  padding: "10px 14px", 
-                  borderRadius: isMe ? "14px 14px 0px 14px" : "14px 14px 14px 0px", 
-                  backgroundColor: isMe ? theme.msgMe : theme.msgOther,
-                  color: isMe ? "#ffffff" : theme.textMsgOther,
-                  boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-                  border: isMe ? "none" : `1px solid ${theme.border}`
-                }}>
-                  <span 
-                    onClick={() => handleUserClick(msg.sender)}
-                    style={{ 
-                      display: "block", 
-                      fontSize: "11px", 
-                      fontWeight: "700",
-                      marginBottom: "4px",
-                      cursor: !isMe ? "pointer" : "default",
-                      color: isMe ? "#fff" : theme.accent
-                    }}
-                  >
-                    {senderName} {isMe && "(Вы)"}
-                  </span>
-                  
-                  {msg.imageUrl && (
-                    <div style={{ marginTop: "5px", marginBottom: "5px" }}>
-                      <img 
-                        src={`http://localhost:5000/v1/messages/image/${msg._id}`} 
-                        alt="Вложение" 
-                        style={{ maxWidth: "100%", maxHeight: "250px", borderRadius: "8px", display: "block", cursor: "pointer" }}
-                        onClick={() => window.open(`http://localhost:5000/v1/messages/image/${msg._id}`, "_blank")}
-                      />
+                {/* САМО СООБЩЕНИЕ */}
+                <div style={{ alignSelf: isMe ? "flex-end" : "flex-start", maxWidth: "65%", display: "flex", gap: "10px", alignItems: "flex-end" }}>                
+                  {!isMe && (
+                    <div 
+                      onClick={() => handleUserClick(msg.sender)}
+                      style={{ cursor: "pointer", width: "34px", height: "34px", borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}
+                    >
+                      {avatarUrl ? (
+                        <img 
+                          src={avatarUrl} 
+                          alt="avatar" 
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                          onError={(e) => { 
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <div style={{ width: "100%", height: "100%", backgroundColor: theme.accent, color: "white", display: avatarUrl ? "none" : "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "13px" }}>
+                        {senderName.charAt(0).toUpperCase()}
+                      </div>
                     </div>
                   )}
 
-                  <div style={{ wordBreak: "break-word", fontSize: "14px", lineHeight: "1.4" }}>
-                    {msg.text}
+                  <div style={{ 
+                    padding: "10px 14px", 
+                    borderRadius: isMe ? "14px 14px 0px 14px" : "14px 14px 14px 0px", 
+                    backgroundColor: isMe ? theme.msgMe : theme.msgOther,
+                    color: isMe ? "#ffffff" : theme.textMsgOther,
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                    border: isMe ? "none" : `1px solid ${theme.border}`,
+                    position: "relative"
+                  }}>
+                    <span 
+                      onClick={() => handleUserClick(msg.sender)}
+                      style={{ 
+                        display: "block", 
+                        fontSize: "11px", 
+                        fontWeight: "700",
+                        marginBottom: "4px",
+                        cursor: !isMe ? "pointer" : "default",
+                        color: isMe ? "#fff" : theme.accent
+                      }}
+                    >
+                      {senderName} {isMe && "(Вы)"}
+                    </span>
+                    
+                    {msg.imageUrl && (
+                      <div style={{ marginTop: "5px", marginBottom: "5px" }}>
+                        <img 
+                          src={`http://localhost:5000/v1/messages/image/${msg._id}`} 
+                          alt="Вложение" 
+                          style={{ maxWidth: "100%", maxHeight: "250px", borderRadius: "8px", display: "block", cursor: "pointer" }}
+                          onClick={() => window.open(`http://localhost:5000/v1/messages/image/${msg._id}`, "_blank")}
+                        />
+                      </div>
+                    )}
+
+                    {/* Текст и кнопка удаления + ВРЕМЯ */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "25px" }}>
+                      <div style={{ wordBreak: "break-word", fontSize: "14px", lineHeight: "1.4", paddingBottom: "2px" }}>
+                        {msg.text}
+                      </div>
+                      
+                      <div style={{ display: "flex", alignItems: "center", gap: "5px", flexShrink: 0 }}>
+                        {/* ВРЕМЯ ОТПРАВКИ */}
+                        <span style={{ 
+                          fontSize: "10px", 
+                          color: isMe ? "rgba(255,255,255,0.7)" : theme.textSub,
+                          userSelect: "none"
+                        }}>
+                          {formatTime(msg.createdAt)}
+                        </span>
+
+                        {/* КНОПКА УДАЛЕНИЯ ДЛЯ АДМИНА */}
+                        {user.role === "admin" && (
+                          <button 
+                            onClick={() => deleteMessage(msg._id)} 
+                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: "12px", padding: 0, color: isMe ? "#ffcbd1" : "#f75a68", opacity: 0.6, transition: "opacity 0.2s" }}
+                            onMouseEnter={(e) => e.target.style.opacity = "1"}
+                            onMouseLeave={(e) => e.target.style.opacity = "0.6"}
+                            title="Удалить сообщение"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
+
               </div>
             );
           })}
@@ -503,7 +631,7 @@ export default function Chat() {
             </button>
 
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "15px" }}>
-              {/* ИСПРАВЛЕНО: Безопасное получение аватарки в модалке */}
+              {/* --- ИЗМЕНЕНИЕ 4: Нормализуем аватарку внутри модального окна профиля --- */}
               {selectedUserProfile.avatar ? (
                 <img 
                   src={getAvatarUrl(selectedUserProfile.avatar)} 

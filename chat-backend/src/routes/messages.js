@@ -4,8 +4,9 @@ const multer = require("multer");
  
 const Message = require("../models/Message");
 const Chat = require("../models/Chat");
+
+ const checkRole = require("../middleware/checkRole");
 const authMiddleware = require("../middleware/authMiddleware");
- 
 const router = express.Router();
  
 // --- ИЗМЕНЕНИЕ: Убрали ограничение на типы картинок ---
@@ -226,7 +227,15 @@ router.get("/:chatId", authMiddleware, async (req, res) => {
     });
   }
 });
- 
+ // Удалить может только админ
+router.delete("/:messageId", authMiddleware, checkRole("admin"), async (req, res) => {
+  try {
+    await Message.findByIdAndDelete(req.params.messageId);
+    res.json({ message: "Сообщение удалено" });
+  } catch (error) {
+    res.status(500).json({ message: "Ошибка сервера" });
+  }
+});
 router.post("/", authMiddleware, (req, res) => {
   uploadMessageImage(req, res, async (uploadError) => {
     if (uploadError) {

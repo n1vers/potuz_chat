@@ -28,6 +28,7 @@ function setAuthCookie(res, token) {
   });
 }
 
+// 1. ИСПРАВЛЕНО: Добавили роль в публичный объект пользователя, который улетает на фронт
 function publicUser(user) {
   return {
     _id: user._id,
@@ -35,13 +36,15 @@ function publicUser(user) {
     email: user.email,
     avatar: user.avatar,
     about: user.about,
+    role: user.role, // <-- ТЕПЕРЬ ТУТ ЕСТЬ РОЛЬ
     createdAt: user.createdAt,
   };
 }
 
 router.post("/register", async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    // 2. ИСПРАВЛЕНО: Достаем role, которую присылает фронтенд при регистрации
+    const { username, email, password, role } = req.body;
 
     if (!username || !email || !password) {
       return res.status(400).json({
@@ -67,10 +70,12 @@ router.post("/register", async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
+    // 3. ИСПРАВЛЕНО: Передаем роль в метод создания. Если она пустая (например, кто-то регается через Postman), сработает default из схемы Mongoose
     const user = await User.create({
       username,
       email: email.toLowerCase(),
       passwordHash,
+      role: role || "user" 
     });
 
     const token = createToken(user._id);

@@ -6,12 +6,12 @@ const path = require("path");
 const cookieParser = require("cookie-parser");
 const cors = require("cors"); // <-- 1. Импортируем cors
 
-const initDatabase = require("./src/config/db");
+const initDatabase = require("./src/db/db");
 const authApi = require("./src/routes/auth");
 const profileApi = require("./src/routes/profile");
 const chatsApi = require("./src/routes/chats");
 const messagesApi = require("./src/routes/messages");
-const setupRealtime = require("./src/gateway/socket");
+const setupRealtime = require("./src/socket/socket");
 
 const app = express();
 const server = http.createServer(app);
@@ -43,7 +43,7 @@ app.use("/static", express.static(path.join(__dirname, "src", "public")));
 app.use("/api/auth", authApi); 
 app.use("/v1/auth", authApi);
 app.use("/v1/profile", profileApi);
-app.use("/v1/chats", chatsApi);
+app.use("/v1/chats", chatsApi); 
 app.use("/v1/messages", messagesApi);
 
 app.get("/health", (_, response) => {

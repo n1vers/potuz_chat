@@ -35,6 +35,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
     },
+    role: { 
+    type: String, 
+    enum: ["user", "admin"], // Задаем список разрешенных ролей
+    default: "user"         // Если роль не передана, автоматом будет обычный юзер
+  },
   },
   {
     timestamps: true,

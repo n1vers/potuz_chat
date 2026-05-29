@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const User = require("../models/User");
 const Chat = require("../models/Chat");
 const authMiddleware = require("../middleware/authMiddleware");
-const { makePrivateChatId } = require("../utils/chat");
+const { makePrivateChatId } = require("../utility/chat");
 
 const router = express.Router();
 

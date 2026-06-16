@@ -118,7 +118,7 @@ app.use((request, response) => {
     error: "Route not found",
     path: request.originalUrl,
   });
-}); 
+}); ```
 
 ## 3. Disain ja arhitektuur (Disain ja arhitektuur)
 
@@ -226,4 +226,106 @@ Kõik käivitatud testjuhtumid on edukalt läbinud (**Passed**).
 * **Käsitsi ja automatiseeritud kontrollide tulemus:**
   * Rollide kontrollimise vahevara (middleware) stabiilsus on testitud olukorras, kus kasutaja rolli muudetakse otse andmebaasis ilma uut tokenit väljastamata. Süsteem suutis muudatuse reaalajas tuvastada ning õigused korrektselt delegeerida või blokeerida.
   * Kliendiliidese veatöötlus töötab korrektselt — serveri poolt tagastatud `403` ja `404` koodid püüti Reacti poolt kinni, hoides ära rakenduse krahhi (Crash) ning tagades kasutajale sujuva ja vigadeta kogemuse.
+---
 
+## 5. Kasutus- ja hooldusjuhend (Kasutus- ja hooldusjuhend)
+
+See peatükk on mõeldud süsteemi administraatoritele, arendajatele ja hooldusmeeskonnale, kes vastutavad rakenduse igapäevase käitamise, tehnilise toe ja uute versioonide paigaldamise eest.
+
+### 5.1. Süsteemi kasutamine (süsteemi kasutamine)
+Rakenduse kasutajaliides kohandub dünaamiliselt vastavalt sisselogitud kasutaja rollile ja serveri õiguste kontrollile.
+
+* **Tavakasutaja funktsionaalsus:**
+  * Kasutaja saab kirjutada tekstiaknesse ja saata sõnumeid, mis ilmuvad reaalajas kõigi ühendatud kasutajate ekraanile.
+  * Kasutaja näeb oma profiilipilti või selle puudumisel automaatselt genereeritud initsiaaliga asendusringi.
+  * Sõnumid kuvatakse kronoloogilises järjekorras ning süsteem rühmitab need kuupäevabännerite (nt "Сегодня", "Вчера") alla.
+* **Administraatori funktsionaalsus:**
+  * Kui süsteem tuvastab kasutaja rolliks `"admin"`, aktiveerub Reacti koodis tingimuslik renderdamine, mis kuvab iga sõnumi juures prügikasti ikooni 🗑️.
+  * Administraator saab mis tahes sõnumi kustutada, vajutades prügikasti ikoonile. Tegevus käivitab asünkroonse `DELETE` päringu serverile ja kustutab sõnumi reaalajas kõigi kasutajate ekraanilt.
+
+### 5.2. Paigaldamine (paigaldamine)
+Süsteemi lokaalseks seadistamiseks ja käivitamiseks arenduskeskkonnas tuleb järgida alljärgnevat tehnilist juhendit.
+
+#### Eeltingimused:
+Masinasse peab olema paigaldatud **Node.js** (soovitatavalt LTS versioon 20 või uuem) ja **npm** (Node Package Manager).
+
+#### Samm 1: Projektikausta liikumine ja sõltuvuste paigaldamine
+Liikuda terminalis serveri projektikausta ja käivitada käsund, mis laeb alla kõik vajalikud paketid (sh `express`, `mongoose`, `socket.io`, `jsonwebtoken`, `bcrypt`, `cookie-parser` ja `cors`):
+```bash
+cd chat-backend
+npm install
+
+---
+
+## 6. Lisad (Lisad)
+
+Käesolev peatükk koondab endasse süsteemi arendamiseks, sünkroniseerimiseks ja hooldamiseks vajalikud andmetabelid, arhitektuurilised skeemid ning ametlikud tehnilised viited rahvusvahelistele standarditele.
+
+### 6.1. Tabelid (tabelid)
+
+Süsteemi toimimise ja andmevoogude mõistmiseks on alljärgnevalt esitatud detailsed tabelid andmebaasi andmetüüpide käitumise, HTTP staatuskoodide tähenduste ning WebSocket sündmuste kohta.
+
+#### 6.1.1. Andmete transformatsiooni võrdlustabel
+Tabelis on välja toodud andmete olekud ja formaadid süsteemi eri kihtides: andmebaasis salvestatuna, võrgukihi transiidis (JSON kujul) ning kliendiliideses (React) lõppkasutajale kuvatuna.
+
+| Funktsionaalne komponent | Olek andmebaasis (MongoDB Atlas) | Olek võrgukihi transiidis (API / JSON) | Kuvamine kasutajaliideses (React Frontend) |
+| :--- | :--- | :--- | :--- |
+| **Kasutaja roll (RBAC)** | `role: "admin"` (Range kontroll läbi Mongoose enum-valideerimise) | `{ "role": "admin" }` (Autentimispäringu vastuses sisalduv võtme-väärtuse paar) | Tingimuslik loogika: aktiveerib administraatori paneeli ja sõnumite juures prügikasti ikooni 🗑️. |
+| **Sõnumi loomise aeg** | `createdAt: 2026-05-14T07:49:24.064+00:00` (ISODate tüüp) | `"createdAt": "2026-05-14T07:49:24.064Z"` (String-vormingus ISO-tempel) | Teisendatud kliendi kohalikuks kellaajaks (nt **10:49**). Rühmitatud kuupäevabänneri "14. mai 2026" alla. |
+| **Kasutaja profiilipilt**| `avatar: "/uploads/avatars/pilt.png"` (Relatiivne teekond stringina) | `"avatar": "/uploads/avatars/pilt.png"` (Kasutajaobjekti alamväli JSON-is) | Dünaamiliselt kokku pandud täispikk URL: `http://localhost:5000/static/uploads/avatars/pilt.png` |
+
+#### 6.1.2. Süsteemi HTTP veakoodide ja reageeringute spetsifikatsioon
+Tabel kirjeldab, kuidas Expressi backend reageerib erinevatele turva- ja päringusündmustele ning kuidas Reacti klient neid käsitleb.
+
+| HTTP kood | Staatus | Tekkepõhjus süsteemis | Kliendipoolne reaktsioon (React) |
+| :--- | :--- | :--- | :--- |
+| **200** | OK | Päring oli edukas (nt sõnumite ajaloo laadimine või administraatori tehtud sõnumi kustutamine). | Uuendatakse liidese olekut (state), kuvatakse andmed või eemaldatakse kustutatud element. |
+| **201** | Created | Uus ressurss on edukalt loodud (nt uue kasutaja registreerimine). | Suunatakse kasutaja sisselogimise või peamisele vestluse lehele. |
+| **401** | Unauthorized | Küpsistes puudub JWT token, see on aegunud või parandatud `authMiddleware` ei leia kasutajat ID alusel andmebaasist. | Katkestatakse sessioon, puhastatakse `localStorage` kasutajaandmetest ja suunatakse kasutaja `/login` lehele. |
+| **403** | Forbidden | Kasutaja on autenditud, kuid vahevara `checkRole("admin")` tuvastas, et kasutaja roll on `user`, mis ei luba antud tegevust. | Kuvatakse konsoolis viga `AxiosError: Request failed with status code 403` ja kasutajale kuvatakse hoiatusteade. |
+| **404** | Not Found | Küsitud API marsruuti ei eksisteeri või Expressi staatiline vahevara ei leia faili kaustast `src/public/uploads/avatars/`. | API puhul kuvatakse teade "Route not found". Pildi puhul käivitub `onError` sündmus ja kuvatakse initsiaaliga asendusring. |
+
+#### 6.1.3. Reaalajas sünkroniseerimise WebSocket (Socket.io) sündmused
+Tabel kirjeldab reaalajas toimivaid asünkroonseid sündmusi kliendi ja serveri vahel.
+
+| Sündmuse nimi (Event) | Suund | Edastatavad andmed (Payload) | Süsteemi tegevus |
+| :--- | :--- | :--- | :--- |
+| `connection` | Klient $\rightarrow$ Server | Puudub | Server tuvastab uue aktiivse kliendi ühenduse ja loob talle unikaalse socketi ID. |
+| `message` | Server $\rightarrow$ Kõik kliendid | Sõnumi objekt (ID, tekst, saatja andmed, kuupäev) | Sõnum lisatakse reaalajas kõigi ühendatud kasutajate ekraanile ja vaade keritakse automaatselt alla. |
+| `delete_message` | Server $\rightarrow$ Kõik kliendid | Sõnumi unikaalne `_id` (String) | Reacti klient filtreerib sissetulnud ID alusel olemasolevate sõnumite massiivi ja eemaldab selle reaalajas ekraanilt. |
+
+### 6.2. Skeemid (skeemid)
+
+Skeemid kirjeldavad visuaalselt ja loogiliselt andmevoogude liikumist, turvakontrolle ja staatiliste failide laadimise mehaanikat. GitHub renderdab need automaatselt graafilisteks joonisteks.
+
+#### 6.2.1. Rollipõhise autentimise ja päringu elutsükli skeem
+See sekventsiaalskeem kirjeldab kasutaja päringu teekonda hetkest, kui administraator vajutab prügikasti nupule, kuni andmete reaalse kustutamiseni MongoDB andmebaasist ja sündmuse levitamiseni.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as React Klient
+    participant Server as Express Server (server.js)
+    participant Auth as authMiddleware.js
+    participant Check as checkRole("admin")
+    participant DB as MongoDB Atlas (User Model)
+
+    Admin->>Server: DELETE /v1/messages/:id (вместе с Cookie)
+    Server->>Auth: Передача управления
+    Auth->>Auth: Чтение и верификация JWT токена
+    alt Токен невалиден или отсутствует
+        Auth-->>Admin: 401 Unauthorized
+    else Токен валиден
+        Auth->>DB: User.findById(decoded.id)
+        DB-->>Auth: Возвращает dbUser (id, username, role)
+        Auth->>Auth: Запись в req.user = dbUser
+        Auth->>Check: next()
+    end
+
+    Check->>Check: Проверка: req.user.role === "admin"?
+    alt Роль является "user"
+        Check-->>Admin: 403 Forbidden (Ошибка удаления сообщения)
+    else Роль является "admin"
+        Check->>Server: next() (Пропуск к контроллеру удаления)
+        Server-->>Admin: 200 OK + Удаление через Socket.io
+    end

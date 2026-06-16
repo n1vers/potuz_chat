@@ -256,7 +256,7 @@ Liikuda terminalis serveri projektikausta ja käivitada käsund, mis laeb alla k
 ```bash
 cd chat-backend
 npm install
-
+```
 ---
 
 ## 6. Lisad (Lisad)

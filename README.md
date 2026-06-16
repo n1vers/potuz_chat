@@ -179,7 +179,8 @@ const APP_PORT = process.env.PORT || 5000;
 
 server.listen(APP_PORT, () => {
   console.log(`Realtime API started on port ${APP_PORT}`);
-}); '''
+});
+```
 ---
 
 ## 4. Testimine (Testimine)

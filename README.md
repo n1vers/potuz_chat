@@ -118,7 +118,8 @@ app.use((request, response) => {
     error: "Route not found",
     path: request.originalUrl,
   });
-}); ```
+});
+```
 
 ## 3. Disain ja arhitektuur (Disain ja arhitektuur)
 

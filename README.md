@@ -118,12 +118,112 @@ app.use((request, response) => {
     error: "Route not found",
     path: request.originalUrl,
   });
-});
+}); 
 
+## 3. Disain ja arhitektuur (Disain ja arhitektuur)
+
+Käesolev peatükk keskendub rakenduse sisemisele struktuurile, moodulitevahelisele koostööle, turvavahevaradele ning andmete transformeerimise loogikale kliendi ja serveri vahel.
+
+### 3.1. Tarkvara arhitektuur (tarkvara arhitektuur)
+Süsteem on projekteeritud **kihilise arhitektuuri (Layered Architecture)** põhimõttel, tagades koodibaasi modulaarsuse, komponentide nõrga seotuse (loose coupling) ja lihtsa hooldatavuse. Iga sissetulev päring liigub läbi kindlalt piiritletud tasemete:
+
+1. **Routing Layer (Marsruutimise kiht):** Võtab vastu HTTP päringud, tuvastab URL-i prefiksid ja suunab päringu edasi vastavale ressursside ruuterile.
+2. **Middleware Layer (Vahevara kiht):** Teostab turvakontrollid, valideerib JWT sisselogimismärgi ja kontrollib kasutaja rollipõhiseid õigusi enne äriloogika käivitamist.
+3. **Business Logic / Gateway Layer (Äriloogika ja lüüsi kiht):** Töötleb andmeid, tegeleb sõnumite kustutamise, valideerimise ja Socket.io kaudu reaalajas sündmuste levitamisega (broadcasting) kõigile klientidele.
+4. **Data Access Layer (Andmekiht):** Suhtleb Mongoose mudelite kaudu otse MongoDB pilveandmebaasiga, täites asünkroonseid I/O operatsioone.
+
+### 3.2. Moodulite kirjeldused (moodulite kirjeldused)
+Rakenduse turvalisus ja rollipõhine juurdepääs (RBAC) põhineb kahel kriitilisel serveripoolsel vahevara moodulil, mis kaitsevad tundlikke API otspunkte.
+
+#### 1. Autentimise vahevara (`middleware/authMiddleware.js`)
+See moodul loeb kliendi päringu küpsistest (`req.cookies.token`) JWT märgise. Juurdepääsu tagamiseks tehakse andmebaasipäring `User.findById()`, et laadida süsteemi **kõige ajakohasem roll** otse andmebaasist. See lahendab probleemi, kus administraatori õiguste käsitsi muutmisel andmebaasis rakenduvad uued õigused koheselt, ilma et kasutaja peaks oma sessiooni katkestama (uuesti sisse logima).
+
+```javascript
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
+
+async function authMiddleware(req, res, next) {
+  try {
+    const token = req.cookies.token;
+
+    if (!token) {
+      return res.status(401).json({ message: "Вы не авторизованы" });
+    }
+
+    // Tokeni valideerimine ja dekodeerimine salajase võtme abil
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Päritakse värsked andmed ja roll otse andmebaasist
+    const dbUser = await User.findById(decoded.id);
+
+    if (!dbUser) {
+      return res.status(401).json({ message: "Пользователь не найден" });
+    }
+
+    // Rikastatakse päringu objekti (req), tehes andmed kättesaadavaks järgmistele kihtidele
+    req.user = {
+      id: dbUser._id,
+      username: dbUser.username,
+      role: dbUser.role 
+    };
+
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Неверный или истёкший токен" });
+  }
+}
+
+module.exports = authMiddleware;
 const APP_PORT = process.env.PORT || 5000;
 
 server.listen(APP_PORT, () => {
   console.log(`Realtime API started on port ${APP_PORT}`);
 }); '''
+---
 
+## 4. Testimine (Testimine)
+
+See peatükk koondab süsteemi kvaliteedikontrolli põhimõtted, detailse testimisplaani, spetsiifilised testjuhtumid ning reaalsed tulemused pärast koodimuudatuste sisseviimist.
+
+### 4.1. Testiplaan (testiplaan)
+Rakenduse testimisel kasutatakse **funktsionaalset musta kasti testimist (Black-Box Testing)**, kus kontrollitakse süsteemi väljundeid vastavalt etteantud sisenditele, tundmata koodi sisemist struktuuri, ning **integratsioonitestimist**, et veenduda komponentide vahelise andmevahetuse (React $\leftrightarrow$ Express $\leftrightarrow$ MongoDB) korrektsuses. 
+
+Erilist tähelepanu pööratakse kahele kriitilisele valdkonnale:
+1. **Rollipõhise juurdepääsu kontroll (RBAC):** Veenduda, et autoriseerimise vahevarad blokeerivad või lubavad tegevusi vastavalt kasutaja rollile.
+2. **Kliendiliidese veatolerantsus:** Kontrollida, kuidas Reacti liides reageerib serveri veakoodidele (403, 404).
+
+### 4.2. Testjuhtumid (testjuhtumid)
+
+#### TC-01: Tavakasutaja õiguste piirangute kontroll (Sõnumi kustutamine)
+* **Eesmärk:** Veenduda, et rolliga `user` autentitud kasutaja ei saa süsteemist sõnumeid kustutada.
+* **Eeltingimused:** Andmebaasis on kasutaja, kelle väljal `role` on väärtus `"user"`. Kasutaja on edukalt sisse logitud ja omab kehtivat JWT küpsist.
+* **Testimissammud:**
+  1. Avada arendustööriistad (Browser DevTools $\rightarrow$ Network vahekaart).
+  2. Saata tavakasutaja sessioonist HTTP `DELETE` päring otspunktile `http://localhost:5000/v1/messages/6a1007524c8a5c2510db0857`.
+  3. Jälgida serveri vastust ja andmebaasi seisundit.
+* **Oodatav tulemus:** Serveri vahevara `checkRole("admin")` tuvastab õiguste puudumise, katkestab päringu ja tagastab staatuse `403 Forbidden` koos JSON sõnumiga `{ "message": "Puuduvad vajalikud õigused" }`. Sõnumit andmebaasist ei kustutata.
+
+#### TC-02: Administraatori õiguste ja reaalajas sünkroniseerimise kontroll
+* **Eesmärk:** Veenduda, et administraator saab sõnumeid kustutada ja muudatus kajastub reaalajas kõigil klientidel.
+* **Eeltingimused:** Kasutaja roll on MongoDB Atlas keskkonnas muudetud väärtusele `"admin"`. Avatud on kaks erinevat brauseriakent (Klient A ja Klient B).
+* **Testimissammud:**
+  1. Logida Kliendi A aknas sisse administraatori kontoga.
+  2. Vajutada soovitud sõnumi juures asuvale prügikasti ikoonile 🗑️.
+  3. Jälgida võrgupäringut Kliendi A aknas ning visuaalset muutust Kliendi B (tavakasutaja) akna ekraanil.
+* **Oodatav tulemus:** Server töötleb päringu edukalt, tagastab staatuse `200 OK`, kustutab kirje MongoDB-st ning saadab läbi Socket.io kõigile ühendatud seadmetele sündmuse `delete_message`. Sõnum kaob mõlema kliendi ekraanilt reaalajas.
+
+#### TC-03: Kliendiliidese käitumine puuduva avatari korral (HTTP 404 käsitlemine)
+* **Eesmärk:** Kontrollida, et serveripoolne pildifaili puudumine ei lõhu kasutajaliidest ja süsteem kuvab asenduskomponendi.
+* **Eeltingimused:** Kasutaja dokumendis on väljal `avatar` väärtus `/uploads/avatars/missing-file.png`, kuid vastavat faili ei eksisteeri serveri kaustas `src/public/uploads/avatars/`.
+* **Testimissammud:**
+  1. Logida sisse ja avada vestlusaken (Chat room).
+  2. Jälgida konsooli vigu (Console) ja kasutaja profiilipildi visuaalset kuvamist.
+* **Oodatav tulemus:** Brauser saab serverilt faili pärimisel vastuseks `404 Not Found`. Element `<img>` vallandab `onError` sündmuse. Käivitub JavaScripti kood, mis seab pildi stiiliks `display: 'none'` ja lülitab sisse varu-div-elemendi (`display: 'flex'`), mis kuvab kasutaja nime esitähe.
+
+### 4.3. Testitulemused (testitulemused)
+Kõik käivitatud testjuhtumid on edukalt läbinud (**Passed**). 
+
+* **Käsitsi ja automatiseeritud kontrollide tulemus:**
+  * Rollide kontrollimise vahevara (middleware) stabiilsus on testitud olukorras, kus kasutaja rolli muudetakse otse andmebaasis ilma uut tokenit väljastamata. Süsteem suutis muudatuse reaalajas tuvastada ning õigused korrektselt delegeerida või blokeerida.
+  * Kliendiliidese veatöötlus töötab korrektselt — serveri poolt tagastatud `403` ja `404` koodid püüti Reacti poolt kinni, hoides ära rakenduse krahhi (Crash) ning tagades kasutajale sujuva ja vigadeta kogemuse.
 
